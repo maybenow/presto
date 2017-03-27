@@ -20,8 +20,12 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.io.ByteStreams;
 import com.google.common.io.Resources;
 import io.airlift.json.JsonCodec;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 
 import javax.inject.Inject;
 
@@ -96,8 +100,31 @@ public class ExampleClient
     private static Map<String, Map<String, ExampleTable>> lookupSchemas(URI metadataUri, JsonCodec<Map<String, List<ExampleTable>>> catalogCodec)
             throws IOException
     {
-        URL result = metadataUri.toURL();
-        String json = Resources.toString(result, UTF_8);
+        String json = null;
+        if (metadataUri.getScheme().equalsIgnoreCase("hdfs")) {
+            // schema file on hdfs
+            String hdfsSiteLocation = "/etc/hadoop/conf/hdfs-site.xml";
+            String coreSiteLocation = "/etc/hadoop/conf/core-site.xml";
+
+            Configuration conf = new Configuration();
+            final Path hdfsConf = new Path(hdfsSiteLocation);
+            final Path coreConf = new Path(coreSiteLocation);
+            conf.addResource(hdfsConf);
+            conf.addResource(coreConf);
+
+            Path schemaPath = new Path(metadataUri);
+
+            FileSystem fs = FileSystem.get(conf);
+
+            if (!fs.exists(schemaPath)) {
+                byte[] schemaBytes = ByteStreams.toByteArray(fs.open(schemaPath));
+                json = new String(schemaBytes, UTF_8);
+            }
+        }
+        else {
+            URL result = metadataUri.toURL();
+            json = Resources.toString(result, UTF_8);
+        }
         Map<String, List<ExampleTable>> catalog = catalogCodec.fromJson(json);
 
         return ImmutableMap.copyOf(transformValues(catalog, resolveAndIndexTables(metadataUri)));
